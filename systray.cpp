@@ -2,27 +2,69 @@
 #include <QSystemTrayIcon>
 #include <QIcon>
 #include <QUdpSocket>
-#include <QNetworkDatagram>
-#include <iostream>
+#include <cstdlib> // strtol()
+#include <iostream> // cerr
 using namespace std;
-// system tray icon to display notifications
-// to test: in bash: echo "This is my data" > /dev/udp/127.0.0.1/3000
-// https://doc.qt.io/qt-5/qudpsocket.html
+// System tray icon to display notifications.
+// This program requires QT to compile.
+// To test using bash shell:  echo test,title,,3, | tr , \\0 > /dev/udp/127.0.0.1/12778
+// echo "test,title,,30,xdg-open http://127.0.0.1:4444>/dev/null," | tr , \\0 > /dev/udp/127.0.0.1/12778
 
 
 class Server: public QObject {
     QSystemTrayIcon& tray;
     QUdpSocket& sock;
-    QIcon icon; // TODO: reference main icon?
+    QIcon icon; // TODO: use/delete/make it a reference to main icon?
+    const char* action;
+    char buff[1025];
 public:
     Server(QSystemTrayIcon& trayIcon, QUdpSocket& socket): tray(trayIcon), sock(socket), icon("icon.xpm") {}
 
-    void read(){ //        while( sock.hasPendingDiagrams() ){
-        QNetworkDatagram data = sock.receiveDatagram();
-        QString msg = QString::fromStdString( data.data().toStdString() );
-        tray.showMessage("Title", msg, icon, 10*1000);
+    void msgClick() {
+        if( nullptr != action){
+            system(action); 
+        }
+// This is a security problem as any local process can execute anything under your user ID.
+// Take only port number instead ???
+//        tray.showMessage("CLICK", action, icon, 5*1000);
+//        system("xdg-open http://127.0.0.1:4444 > /dev/null");
     }
-};
+
+    void read() {
+        int rdSize = sock.readDatagram(buff, sizeof(buff)-1); // pendingDatagramSize()
+        char* end = buff+rdSize; // at this point buff should contain 5 strings: msg, title, icon, timeout, action
+        *end = 0; // null terminate the buffer
+
+        const char* msg = buff;
+        const char* title = "TITLE";
+        const char* iconFile = "icon.xpm";
+        const char* timeoutStr = "10";
+
+        if(msg+strlen(msg) < end){
+            title = msg+strlen(msg)+1;
+            if(title < end){
+                iconFile = title+strlen(title)+1;
+                if(iconFile < end){
+                    timeoutStr = iconFile+strlen(iconFile)+1;
+                    if(timeoutStr < end){
+                        action = timeoutStr+strlen(timeoutStr)+1;
+                        if(action+strlen(action) >= end){
+                            action = nullptr;
+                        }
+                    }
+                }
+            }
+        }
+
+        int timeout = strtol(timeoutStr, nullptr, 10); // base 10
+        timeout = timeout < 1 ? 10 : timeout; // message should be visible for at least one second
+
+        if( strlen(iconFile) < 5 ){ iconFile = "icon.xpm"; } // minimum file name length "a.xpm"
+        QIcon iconObj(iconFile);
+
+        tray.showMessage(title, msg, iconObj, timeout*1000);
+    } // read()
+}; // class Server
 
 
 int main( int argc, char **argv ) {
@@ -37,12 +79,6 @@ int main( int argc, char **argv ) {
         return 2;
     }
 
-    QSystemTrayIcon tray;
-    QIcon icon("icon.xpm");
-    tray.setIcon(icon);
-    tray.setToolTip("OutNet");
-    tray.show();
-
     int PORT = 12778;
     QUdpSocket sock;
     if( !sock.bind(QHostAddress::LocalHost, PORT) ){
@@ -50,8 +86,15 @@ int main( int argc, char **argv ) {
         return 3;
     }
 
+    QSystemTrayIcon tray;
+    QIcon icon("icon.xpm");
+    tray.setIcon(icon);
+    tray.setToolTip("OutNet");
+    tray.show();
+
     Server server(tray, sock);
-    QObject::connect(&sock, &QUdpSocket::readyRead, &server, &Server::read);
+    QObject::connect(&sock, &QUdpSocket::readyRead, &server, &Server::read); // connect signal for socket readyRead
+    QObject::connect(&tray, &QSystemTrayIcon::messageClicked, &server, &Server::msgClick); // for messageClicked
 
     return app.exec();
 }

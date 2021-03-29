@@ -15,14 +15,15 @@ class Server: public QObject {
     QSystemTrayIcon& tray;
     QUdpSocket& sock;
     QIcon icon; // TODO: use/delete/make it a reference to main icon?
-    const char* action;
+    const char* action = nullptr;
     char buff[1025];
 public:
     Server(QSystemTrayIcon& trayIcon, QUdpSocket& socket): tray(trayIcon), sock(socket), icon("icon.xpm") {}
 
     void msgClick() {
         if( nullptr != action){
-            system(action); 
+            system(action);
+            action = nullptr;
         }
 // This is a security problem as any local process can execute anything under your user ID.
 // Take only port number instead ???
